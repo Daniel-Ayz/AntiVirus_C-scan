@@ -34,9 +34,9 @@ virus* readVirus(FILE* inputFile, int littleEndian){
         free(virus);
         return NULL;
     }
-    // if (!littleEndian){
-    //     virus->SigSize = ntohs(virus->SigSize);
-    // }
+    if (!littleEndian){
+        virus->SigSize = be16toh(virus->SigSize);
+    }
     virus->sig = calloc(1, virus->SigSize);
     int secondRead = fread(virus->sig, sizeof(char), virus->SigSize, inputFile);
     if(secondRead == 0){
@@ -134,19 +134,80 @@ link* run_function(link* virus_list, FILE* file, link* (*func)(link*, FILE*)){
     return func(virus_list, file);
 }
 
+void detect_virus(char* buffer, unsigned int size, link* virus_list){
+    link* ptr = virus_list;
+    while(ptr != NULL){
+        for(int i=0; i<size; i++){
+            if(memcmp(buffer+i, ptr->vir->sig, ptr->vir->SigSize) == 0){
+                printf("Virus detected at byte: %d\n", i);
+                printf("Virus name: %s\n", ptr->vir->virusName);
+                printf("Virus signature size: %d\n", ptr->vir->SigSize);
+            }
+        }
+        ptr = ptr->nextVirus;
+    }
+}
+
 link* detect_viruses(link* virus_list, FILE* file){
     if(file == NULL){
-        printf("[*] file for scan should be specified in command line arguments\n");
+        printf("[*] File for scan should be specified in command line arguments\n");
+        return virus_list;
     }
-    printf("Not implemented\n");
+    else if(virus_list == NULL){
+        printf("[*] No virus signatures were specified\n");
+        return virus_list;
+    }
+    char * file_to_scan_buffer = calloc(10000, sizeof(char));
+    size_t bytes_read = fread(file_to_scan_buffer, sizeof(char), 10000, file);
+    detect_virus(file_to_scan_buffer, bytes_read, virus_list);
+    free(file_to_scan_buffer);
+    fseek(file, 0, SEEK_SET);
     return virus_list;
+}
+
+void neutralize_virus(FILE* file, int signatureOffset){
+    char ret_opt = 0xC3;
+    fseek(file, signatureOffset, SEEK_SET);
+    fwrite(&ret_opt, 1, 1, file);
+    fseek(file, 0, SEEK_SET);
+}
+
+int next_virus(char* buffer, unsigned int size, link* virus_list){
+    link* ptr = virus_list;
+    while(ptr != NULL){
+        for(int i=0; i<size; i++){
+            if(memcmp(buffer+i, ptr->vir->sig, ptr->vir->SigSize) == 0){
+                return i;
+            }
+        }
+        ptr = ptr->nextVirus;
+    }
+    return -1;
 }
 
 link* fix_file(link* virus_list, FILE* file){
     if(file == NULL){
         printf("[*] file for scan should be specified in command line arguments\n");
+        return virus_list;
     }
-    printf("Not implemented\n");
+    else if(virus_list == NULL){
+        printf("[*] No virus signatures were specified\n");
+        return virus_list;
+    }
+    
+    char * file_to_scan_buffer = calloc(10000, sizeof(char));
+    size_t bytes_read = fread(file_to_scan_buffer, sizeof(char), 10000, file);
+    int nextVir = -1;
+    while ((nextVir = next_virus(file_to_scan_buffer, bytes_read, virus_list)) != -1){
+        neutralize_virus(file, nextVir);
+        free(file_to_scan_buffer);
+        fseek(file, 0, SEEK_SET);
+        file_to_scan_buffer = calloc(10000, sizeof(char));
+        bytes_read = fread(file_to_scan_buffer, sizeof(char), 10000, file);
+    }
+    free(file_to_scan_buffer);
+    fseek(file, 0, SEEK_SET);
+
     return virus_list;
 }
 
@@ -165,7 +226,7 @@ int main(int argc, char **argv){
     struct fun_desc menu[] = { { "Load signatures", load_signatures_wrap }, { "Print signatures", list_print_wrap }, { "Detect viruses", detect_viruses }, { "Fix file", fix_file }, { "Quit", quit },{ NULL, NULL } };
     FILE* file_to_scan = NULL;
     if(argc > 1){
-        file_to_scan = fopen(argv[1], "rb");
+        file_to_scan = fopen(argv[1], "r+b");
     }
 
     //find size of menu
@@ -174,6 +235,7 @@ int main(int argc, char **argv){
     while(p.name != NULL){
         p = menu[++i];
     }
+    char ascii_i = i + '0';
 
     //Main menu
     printf("Select operation from the following menu:\n");
@@ -183,7 +245,12 @@ int main(int argc, char **argv){
     printf("Option:");
     while(fgets(choise, 3, stdin) != NULL){
         int number = atoi(&choise[0]);
-        if ( number < 0 || i <= number){
+        // int number = atoi(&choise[0]);
+        // if ( number < 0 || i <= number){
+        //     printf("Not within bounds\n");
+        //     exit(1);
+        // }
+        if(choise[0] < '0' || ascii_i <= choise[0]){
             printf("Not within bounds\n");
             exit(1);
         }
